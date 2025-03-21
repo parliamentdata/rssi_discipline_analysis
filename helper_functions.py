@@ -220,7 +220,7 @@ ENGINE = create_db_engine(DB_CONFIG)
 
 REPORT_CARD_QUERY = """
 SELECT rcdts, num_stdnt_enrlmnt
-FROM report_card
+FROM report_card WHERE school_year = '2023-24'
 """
 
 REPORT_CARD_DISC_QUERY = """
@@ -228,7 +228,7 @@ SELECT rcdts, isbe_type, school_name, district,
     num_stdnts_with_discipline_incidents,
     num_disc_incdts_viol_harm, num_disc_incdts_viol_noharm, 
     num_disc_incdts_firearm, num_disc_incdts_oth_wpn
-FROM report_card_disc
+FROM report_card_disc WHERE school_year = '2023-24'
 """
 
 RSSI_COHORTS_QUERY = """
