@@ -398,6 +398,7 @@ def score_distribution_table(df, column, bin_size):
     scoring_methods = {
         "Quantile": f"{column}_score_quantile_{bin_size}",
         "Normal": f"{column}_score_normal_{bin_size}",
+        "Log Normal": f"{column}_score_ln_normal_{bin_size}",
         "Custom": f"{column}_score_custom_{bin_size}"
     }
 
