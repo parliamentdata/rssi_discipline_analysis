@@ -17,7 +17,6 @@ git clone https://github.com/parliamentdata/rssi_discipline_analysis.git
 
 Activate the virtual environment to ensure you have a clean, isolated environment for this project:
 ```bash
-# Activate the virtual environment
 # For macOS/Linux
 source discipline_venv/bin/activate
 
