@@ -87,6 +87,7 @@ def calculate_violent_inc_ratio(
 
     df = df.copy()
 
+    # Apply transformations
     df.loc[:, numerator_cols] = df[numerator_cols].apply(pd.to_numeric, errors='coerce')
     df.loc[:, enrollment_col] = pd.to_numeric(df[enrollment_col], errors='coerce')
 
@@ -98,7 +99,7 @@ def calculate_violent_inc_ratio(
         else:
             violence_incidents_count = row[numerator_cols].sum(skipna=True)
             df.loc[idx, new_col_name] = violence_incidents_count / row[enrollment_col]
-
+    
     return df
 
 def calculate_disciplinary_to_violence_ratio(
@@ -138,48 +139,6 @@ def calculate_disciplinary_to_violence_ratio(
             df.loc[idx, new_col_name] = disciplinary_action_count / violence_incidents_count
 
     return df
-
-def count_schools_by_quantile(df, column, quantiles, column_label="quantile"):
-    """
-    Calculates the number of schools in each quantile for a given column using
-    precomputed quantiles.
-
-    Parameters:
-        df (DataFrame): The DataFrame containing the data.
-        column (str): The column for which quantile counts are calculated.
-        quantiles (Series): Precomputed quantile values.
-        column_label (str): The name of the new column to store quantile labels.
-
-    Returns:
-        DataFrame: A DataFrame with quantile ranges and counts.
-    """
-
-    quantile_labels = [f"Q{i+1}" for i in range(len(quantiles) - 1)]
-
-    df[column] = pd.to_numeric(df[column], errors='coerce')
-    df = df.dropna(subset=[column])
-
-    df[column_label] = pd.cut(
-        df[column], bins=quantiles, labels=quantile_labels, include_lowest=True
-    )
-
-    quantile_counts = (
-        df.groupby(column_label, observed=False)
-          .size()
-          .reset_index(name="school_count")
-    )
-
-    quantile_ranges = [
-        f"[{quantiles[i]:.2f}, {quantiles[i+1]:.2f}]" for i in range(len(quantiles))
-    ]
-
-    quantile_summary = pd.DataFrame({
-        "quantile": quantile_labels,
-        "quantile_range": quantile_ranges,
-        "school_count": quantile_counts["school_count"].values
-    })
-
-    return quantile_summary
 
 def generate_histograms(report_card_df):
     fig, axes = plt.subplots(2, 4, figsize=(18, 10))
@@ -253,12 +212,12 @@ report_card_df = aggregate_columns(report_card_df, aggregation_map_disc)
 
 report_card_df = calculate_exclusion_ratio(
     report_card_df, ['num_stdnts_with_discipline_incidents'],
-    'num_stdnt_enrlmnt', 'disciplinary_action_ratio'
+    'num_stdnt_enrlmnt', 'disciplinary_action_ratio', np.nan
 )
 
 report_card_df = calculate_violent_inc_ratio(
     report_card_df, ['num_disc_incdts_violent', 'num_disc_incdts_other'],
-    'num_stdnts_with_discipline_incidents', 'violent_incidents_ratio'
+    'num_stdnts_with_discipline_incidents', 'violent_incidents_ratio', np.nan
 )
 
 report_card_df['disciplinary_action_ratio'] = pd.to_numeric(
@@ -270,9 +229,12 @@ report_card_df['violent_incidents_ratio'] = pd.to_numeric(
 
 summary_table = (
     report_card_df[['disciplinary_action_ratio', 'violent_incidents_ratio']]
-               .describe()
-               .round(3)
+    .describe(include='all')
+    .round(3)
 )
+
+summary_table.loc['size'] = len(report_card_df)
+summary_table.loc['null count'] = report_card_df.isnull().sum()
 
 def normalize_scores(df, column, bin_size):
     """
