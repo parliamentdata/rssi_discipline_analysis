@@ -59,12 +59,3 @@ jupyter notebook discipline_analysis.ipynb
 ### 7. **Run the Code:**
 
 Execute the code cells sequentially to follow the analysis and generate the insights. Each section of the notebook provides explanations and comments about the steps being taken.
-
-### Additional Notes:
-
-- **Updating the Environment:** If you need to install new packages in the virtual environment, activate the `discipline_venv` and use `pip install <package-name>`.
-  
-- **Deactivating the Virtual Environment:** When you are done, deactivate the virtual environment by running:
-  ```bash
-  deactivate
-  ```
