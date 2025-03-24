@@ -27,9 +27,15 @@ def aggregate_columns(df, aggregation_map):
         df[new_col] = df[cols_to_sum].sum(axis=1)
     return df
 
+def filter_rssi_schools(df, engine):
+    rssi_cohorts_query = "SELECT rcdts FROM rssi_cohorts"
+    rssi_cohorts_df = load_data(engine, rssi_cohorts_query)
+
+    return rssi_cohorts_df.merge(df, on='rcdts', how='left')
+
 def calculate_exclusion_ratio(
         df,
-        suspension_cols,
+        suspension_col,
         enrollment_col,
         new_col_name,
         missing_data_value=None
@@ -50,16 +56,18 @@ def calculate_exclusion_ratio(
 
     df = df.copy()
 
-    df.loc[:, suspension_cols] = df[suspension_cols].apply(pd.to_numeric, errors='coerce')
+    df.loc[:, suspension_col] = df[suspension_col].apply(pd.to_numeric, errors='coerce')
     df.loc[:, enrollment_col] = pd.to_numeric(df[enrollment_col], errors='coerce')
 
     df[new_col_name] = missing_data_value
 
     for idx, row in df.iterrows():
-        if pd.isnull(row[enrollment_col]) or row[enrollment_col] <= 0:
+        if pd.isnull(row[enrollment_col]) and pd.isnull(row[suspension_col]):
+            df.loc[idx, new_col_name] = np.nan
+        elif pd.isnull(row[enrollment_col]) or row[enrollment_col] <= 0:
             df.loc[idx, new_col_name] = missing_data_value
         else:
-            disciplinary_action_count = row[suspension_cols].sum(skipna=True)
+            disciplinary_action_count = row[suspension_col]
             df.loc[idx, new_col_name] = disciplinary_action_count / row[enrollment_col]
 
     return df
@@ -173,68 +181,6 @@ def generate_histograms(report_card_df):
     plt.tight_layout(rect=[0, 0, 1, 0.96])  # Adjust layout to fit title
     plt.show()
 
-CONFIG = load_config()
-DB_CONFIG = CONFIG['rssi-data-warehouse']['dataconnection']
-ENGINE = create_db_engine(DB_CONFIG)
-
-REPORT_CARD_QUERY = """
-SELECT rcdts, num_stdnt_enrlmnt
-FROM report_card WHERE school_year = '2023-24'
-"""
-
-REPORT_CARD_DISC_QUERY = """
-SELECT rcdts, isbe_type, school_name, district, 
-    num_stdnts_with_discipline_incidents,
-    num_disc_incdts_viol_harm, num_disc_incdts_viol_noharm, 
-    num_disc_incdts_firearm, num_disc_incdts_oth_wpn
-FROM report_card_disc WHERE school_year = '2023-24'
-"""
-
-RSSI_COHORTS_QUERY = """
-SELECT rcdts
-FROM rssi_cohorts
-"""
-
-REPORT_CARD_DF = load_data(ENGINE, REPORT_CARD_QUERY)
-REPORT_CARD_DISC_DF = load_data(ENGINE, REPORT_CARD_DISC_QUERY)
-
-report_card_df = pd.merge(REPORT_CARD_DF, REPORT_CARD_DISC_DF, on='rcdts', how='inner')
-
-aggregation_map_disc = {
-    'num_disc_incdts_violent': [
-        'num_disc_incdts_viol_harm', 'num_disc_incdts_viol_noharm'
-    ],
-    'num_disc_incdts_other': [
-        'num_disc_incdts_firearm', 'num_disc_incdts_oth_wpn'
-    ]
-}
-report_card_df = aggregate_columns(report_card_df, aggregation_map_disc)
-
-report_card_df = calculate_exclusion_ratio(
-    report_card_df, ['num_stdnts_with_discipline_incidents'],
-    'num_stdnt_enrlmnt', 'disciplinary_action_ratio', np.nan
-)
-
-report_card_df = calculate_violent_inc_ratio(
-    report_card_df, ['num_disc_incdts_violent', 'num_disc_incdts_other'],
-    'num_stdnts_with_discipline_incidents', 'violent_incidents_ratio', np.nan
-)
-
-report_card_df['disciplinary_action_ratio'] = pd.to_numeric(
-    report_card_df['disciplinary_action_ratio'], errors='coerce'
-)
-report_card_df['violent_incidents_ratio'] = pd.to_numeric(
-    report_card_df['violent_incidents_ratio'], errors='coerce'
-)
-
-summary_table = (
-    report_card_df[['disciplinary_action_ratio', 'violent_incidents_ratio']]
-    .describe(include='all')
-    .round(3)
-)
-
-summary_table.loc['size'] = len(report_card_df)
-summary_table.loc['null count'] = report_card_df.isnull().sum()
 
 def normalize_scores(df, column, bin_size):
     """
@@ -348,32 +294,6 @@ def quantile_scores(df, column, bin_size):
 
     return new_df
 
-columns_to_score = [
-    'disciplinary_action_ratio',
-    'violent_incidents_ratio'
-]
-
-custom_bins_scores_5 = {
-    'disciplinary_action_ratio': {
-        'bins': [0, 0.005, 0.02, 0.1, 0.3, 0.5, 1],
-        'scores': [100, 80, 60, 40, 20, 0],
-    },
-    'violent_incidents_ratio': {
-        'bins': [0, 0.25, 0.5, 1.0, 1.5, 3.0, float('inf')],
-        'scores': [100, 80, 60, 40, 20, 0],
-    }
-}
-
-custom_bins_scores_10 = {
-    'disciplinary_action_ratio': {
-        'bins': [0, 0.0025, 0.005, 0.01, 0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 1],
-        'scores': [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0],
-    },
-    'violent_incidents_ratio': {
-        'bins': [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 1.0, 1.25, 1.5, 3.0, float('inf')],
-        'scores': [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0],
-    }
-}
 
 def score_distribution_table(df, column, bin_size):
     """
@@ -536,6 +456,97 @@ def plot_score_distribution(df, column, bin_size, methods=None):
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.show()
+
+def main(arg):
+    CONFIG = load_config()
+    DB_CONFIG = CONFIG['rssi-data-warehouse']['dataconnection']
+    ENGINE = create_db_engine(DB_CONFIG)
+
+    REPORT_CARD_QUERY = """
+    SELECT rcdts, num_stdnt_enrlmnt
+    FROM report_card WHERE school_year = '2023-24'
+    """
+
+    REPORT_CARD_DISC_QUERY = """
+    SELECT rcdts, isbe_type, school_name, district, 
+        num_stdnts_with_discipline_incidents,
+        num_disc_incdts_viol_harm, num_disc_incdts_viol_noharm, 
+        num_disc_incdts_firearm, num_disc_incdts_oth_wpn
+    FROM report_card_disc WHERE school_year = '2023-24'
+    """
+
+    REPORT_CARD_DF = load_data(ENGINE, REPORT_CARD_QUERY)
+    REPORT_CARD_DISC_DF = load_data(ENGINE, REPORT_CARD_DISC_QUERY)
+
+    report_card_df = pd.merge(REPORT_CARD_DF, REPORT_CARD_DISC_DF, on='rcdts', how='inner')
+
+    aggregation_map_disc = {
+        'num_disc_incdts_violent': [
+            'num_disc_incdts_viol_harm', 'num_disc_incdts_viol_noharm'
+        ],
+        'num_disc_incdts_other': [
+            'num_disc_incdts_firearm', 'num_disc_incdts_oth_wpn'
+        ]
+    }
+    report_card_df = aggregate_columns(report_card_df, aggregation_map_disc)
+
+    report_card_df = calculate_exclusion_ratio(
+        report_card_df, 'num_stdnts_with_discipline_incidents',
+        'num_stdnt_enrlmnt', 'disciplinary_action_ratio', np.nan
+    )
+
+    report_card_df = calculate_violent_inc_ratio(
+        report_card_df, ['num_disc_incdts_violent', 'num_disc_incdts_other'],
+        'num_stdnts_with_discipline_incidents', 'violent_incidents_ratio', np.nan
+    )
+
+    report_card_df['disciplinary_action_ratio'] = pd.to_numeric(
+        report_card_df['disciplinary_action_ratio'], errors='coerce'
+    )
+    report_card_df['violent_incidents_ratio'] = pd.to_numeric(
+        report_card_df['violent_incidents_ratio'], errors='coerce'
+    )
+
+    if arg == 'rssi':
+        report_card_df = filter_rssi_schools(report_card_df, ENGINE)
+
+    summary_table = (
+        report_card_df[['disciplinary_action_ratio', 'violent_incidents_ratio']]
+        .describe(include='all')
+        .round(3)
+    )
+
+    summary_table.loc['size'] = len(report_card_df)
+    summary_table.loc['null count'] = report_card_df.isnull().sum()
+
+    columns_to_score = [
+        'disciplinary_action_ratio',
+        'violent_incidents_ratio'
+    ]
+
+    custom_bins_scores_5 = {
+        'disciplinary_action_ratio': {
+            'bins': [0, 0.005, 0.02, 0.1, 0.3, 0.5, 1],
+            'scores': [100, 80, 60, 40, 20, 0],
+        },
+        'violent_incidents_ratio': {
+            'bins': [0, 0.25, 0.5, 1.0, 1.5, 3.0, float('inf')],
+            'scores': [100, 80, 60, 40, 20, 0],
+        }
+    }
+
+    custom_bins_scores_10 = {
+        'disciplinary_action_ratio': {
+            'bins': [0, 0.0025, 0.005, 0.01, 0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 1],
+            'scores': [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0],
+        },
+        'violent_incidents_ratio': {
+            'bins': [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 1.0, 1.25, 1.5, 3.0, float('inf')],
+            'scores': [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0],
+        }
+    }
+
+    return summary_table, report_card_df, columns_to_score, custom_bins_scores_5, custom_bins_scores_10
 
 # EXTRA:
 
